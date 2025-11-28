@@ -1,0 +1,27 @@
+name: Radar Tiburones SEC
+
+on:
+  schedule:
+    - cron: '0 * * * *' # Se ejecuta en el minuto 0 de cada hora
+  workflow_dispatch: # Te permite darle a un botón para probarlo manualmente
+
+jobs:
+  run-script:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Descargar código
+        uses: actions/checkout@v2
+
+      - name: Configurar Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: '3.9'
+
+      - name: Instalar librerías
+        run: pip install -r requirements.txt
+
+      - name: Ejecutar Radar
+        env:
+          # Aquí conectamos el secreto con el código
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+        run: python main.py
