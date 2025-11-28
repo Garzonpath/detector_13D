@@ -1,78 +1,88 @@
 
 import requests
 import feedparser
-import smtplib
-from email.mime.text import MIMEText
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+import os
 
 # --- CONFIGURACIÓN ---
-EMAIL_SENDER = "TU_CORREO@gmail.com"
-EMAIL_PASSWORD = "TU_CONTRASEÑA_DE_APLICACION" # Generar en Google Account > Seguridad
-EMAIL_RECEIVER = "TU_CORREO@gmail.com"
-
-# IMPORTANTE: La SEC exige este formato exacto en el User-Agent
+# AQUÍ ES DONDE TIENES QUE PONER TU EMAIL REAL
+# Si no lo pones, la SEC te devolverá 0 resultados.
 HEADERS = {
-    "User-Agent": "InvestigadorIndividual tu_email@gmail.com",
+    "User-Agent": "InvestigadorIndependiente agarzon@unh.es", 
     "Accept-Encoding": "gzip, deflate",
     "Host": "www.sec.gov"
 }
 
+# Tu lista de tiburones
 SHARKS = [
     "ELLIOTT", "STARBOARD", "ICAHN", "PERSHING SQUARE", "THIRD POINT", 
-    "TRIAN", "VALUEACT", "CORVEX", "APPALOOSA", "BAUPOST", "GREENLIGHT"
+    "TRIAN", "VALUEACT", "CORVEX", "APPALOOSA", "BAUPOST", "GREENLIGHT",
+    "DANIEL S. LOEB", "ACKMAN"
 ]
 
-# URL del Feed de la SEC filtrado solo para 13D
-SEC_FEED_URL = "https://www.sec.gov/cgi-bin/browse-edgar?action=getcurrent&type=SC%2013D&company=&dateb=&owner=only&start=0&count=40&output=atom"
+# Leemos el secreto de Discord que ya guardaste
+DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK")
 
-def send_alert(title, link, date):
-    msg = MIMEText(f"🦈 TIBURÓN DETECTADO\n\nArchivo: {title}\nFecha: {date}\nLink: {link}")
-    msg['Subject'] = f"🚨 ALERTA SEC: {title[:30]}..."
-    msg['From'] = EMAIL_SENDER
-    msg['To'] = EMAIL_RECEIVER
-
+def send_discord_alert(title, link, date, shark_name):
+    data = {
+        "username": "Radar SEC 13D",
+        "embeds": [{
+            "title": f"🚨 TIBURÓN DETECTADO: {shark_name}",
+            "description": f"**Archivo:** {title}\n**Fecha:** {date}",
+            "url": link,
+            "color": 16711680, 
+            "footer": {"text": "Sistema de Vigilancia Automático"}
+        }]
+    }
     try:
-        # Configuración para Gmail
-        server = smtplib.SMTP_SSL('smtp.gmail.com', 465)
-        server.login(EMAIL_SENDER, EMAIL_PASSWORD)
-        server.sendmail(EMAIL_SENDER, EMAIL_RECEIVER, msg.as_string())
-        server.quit()
-        print(f"Correo enviado: {title}")
+        requests.post(DISCORD_WEBHOOK_URL, json=data)
+        print(f"Alerta enviada para {shark_name}")
     except Exception as e:
-        print(f"Error enviando email: {e}")
+        print(f"Error enviando a Discord: {e}")
 
 def check_sec():
-    print("Conectando con la SEC...")
+    url = "https://www.sec.gov/cgi-bin/browse-edgar?action=getcurrent&type=SC%2013D&company=&dateb=&owner=only&start=0&count=40&output=atom"
+    
+    print("📡 Conectando con la SEC...")
     try:
-        # Usamos requests para tener control total de los Headers
-        response = requests.get(SEC_FEED_URL, headers=HEADERS, timeout=10)
+        response = requests.get(url, headers=HEADERS, timeout=20)
         
         if response.status_code == 403:
-            print("❌ Error 403: La SEC nos ha bloqueado. Revisa el User-Agent.")
+            print("❌ BLOQUEADO (403). Revisa el User-Agent.")
             return
 
-        # Parseamos el XML
         feed = feedparser.parse(response.content)
-
-        print(f"Encontradas {len(feed.entries)} entradas recientes.")
-
-        # Lógica para no repetir: (En producción usarías una DB o archivo local)
-        # Aquí filtramos solo los de las últimas 24h como ejemplo
-        yesterday = datetime.now() - timedelta(days=1)
         
+        # Obtenemos la hora actual en UTC
+        now = datetime.now(timezone.utc)
+        
+        # Miramos 70 mins atrás
+        lookback_window = timedelta(minutes=70) 
+
+        print(f"🔎 Analizando {len(feed.entries)} archivos recientes...")
+
         for entry in feed.entries:
-            title = entry.title.upper()
-            link = entry.link
+            try:
+                published_time = datetime.fromisoformat(entry.updated)
+            except:
+                continue 
+
+            if (now - published_time) > lookback_window:
+                continue
+
+            title_upper = entry.title.upper()
             
-            # Buscamos coincidencias
             for shark in SHARKS:
-                if shark in title:
-                    print(f"✅ MATCH: {shark} en {title}")
-                    send_alert(entry.title, link, entry.updated)
+                if shark in title_upper:
+                    print(f"✅ ENCONTRADO: {shark}")
+                    send_discord_alert(entry.title, entry.link, entry.updated, shark)
                     break
-    
+                    
     except Exception as e:
-        print(f"Error general: {e}")
+        print(f"Error crítico: {e}")
 
 if __name__ == "__main__":
-    check_sec()
+    if not DISCORD_WEBHOOK_URL:
+        print("⚠️ ERROR: No encuentro el secreto DISCORD_WEBHOOK")
+    else:
+        check_sec()
